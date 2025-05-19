@@ -1,69 +1,256 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ADA Ramp Calculator</title>
+  <title>ADA Ramp Designer & Profile Analyzer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: sans-serif; max-width: 600px; margin: 1em auto; padding: 0 1em; }
-    h1 { text-align: center; }
-    .field { margin-bottom: 1em; }
-    label { display: block; margin-bottom: 0.3em; }
-    input { width: 100%; padding: 0.5em; font-size: 1em; box-sizing: border-box; }
-    .results { background: #f9f9f9; padding: 1em; border-radius: 4px; }
-    .result-row { display: flex; justify-content: space-between; margin-bottom: 0.5em; }
-    .result-row:last-child { margin-bottom: 0; }
+    body { font-family: sans-serif; max-width: 900px; margin: 1em auto; padding: 0 1em; }
+    h1, h2, h3 { text-align: center; }
+    section { margin-bottom: 2em; }
+    .field { margin-bottom: 1em; display: flex; align-items: center; }
+    .field label { flex: 0 0 180px; }
+    .field input { flex: 1; padding: 0.3em; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 1em; }
+    th, td { border: 1px solid #ccc; padding: 0.5em; text-align: center; }
+    button { padding: 0.5em 1em; margin: 0 0.5em 0.5em 0; }
+    #profileCanvas { border: 1px solid #ccc; display: block; margin: 1em auto; cursor: crosshair; }
+    .spot-result, .design-result, .click-result { font-size: 1.1em; margin-top: 0.5em; text-align: center; }
+    .click-result span { font-weight: bold; }
   </style>
 </head>
 <body>
-  <h1>ADA Ramp Calculator</h1>
-  <div class="field">
-    <label for="rise">Rise (inches)</label>
-    <input type="number" id="rise" min="0" step="any" placeholder="Enter vertical rise">
-  </div>
-  <div class="field">
-    <label for="ratio">Slope Ratio (1 : X)</label>
-    <input type="number" id="ratio" min="1" step="any" placeholder="Enter run per inch of rise">
-  </div>
-  <div class="results">
-    <div class="result-row"><strong>Run Required (inches)</strong><span id="run">—</span></div>
-    <div class="result-row"><strong>Slope %</strong><span id="percent">—</span></div>
-    <div class="result-row"><strong>Number of Runs</strong><span id="nRuns">—</span></div>
-    <div class="result-row"><strong>Landings Required</strong><span id="landings">—</span></div>
-    <div class="result-row"><strong>Total Landing Length (inches)</strong><span id="landingLen">—</span></div>
+  <h1>ADA Ramp Designer & Profile Analyzer</h1>
+
+  <!-- Design Section -->
+  <section>
+    <h2>Design Ramp by Slope</h2>
+    <div class="field">
+      <label for="startElev">Start Elevation (ft):</label>
+      <input type="number" id="startElev" step="any" placeholder="e.g. 0">
+    </div>
+    <div class="field">
+      <label for="designSlope">Desired Slope (%):</label>
+      <input type="number" id="designSlope" step="any" placeholder="e.g. 8">
+    </div>
+    <div class="field">
+      <label for="designRun">Run Length (ft):</label>
+      <input type="number" id="designRun" step="any" placeholder="e.g. 10">
+    </div>
+    <button id="computeDesign">Compute Design</button>
+    <div class="design-result">
+      End Elevation: <span id="endElev">—</span> ft &nbsp; | &nbsp;
+      Rise: <span id="designRise">—</span> ft
+    </div>
+  </section>
+
+  <!-- Profile Section -->
+  <section>
+    <h2>Profile Points & Analysis</h2>
+    <table id="pointsTable">
+      <thead>
+        <tr><th>Distance (ft)</th><th>Elevation (ft)</th><th>Action</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><input type="number" class="dist" value="0" step="any"></td>
+          <td><input type="number" class="elev" step="any"></td>
+          <td><button class="removeBtn">Remove</button></td>
+        </tr>
+      </tbody>
+    </table>
+    <button id="addPoint">Add Point</button>
+    <button id="computeProfile">Compute Profile</button>
+
+    <h3>Segment Calculations</h3>
+    <table id="segmentsTable">
+      <thead>
+        <tr><th>#</th><th>Run (ft)</th><th>Rise (ft)</th><th>Slope %</th><th>Ratio (1:X)</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div class="field">
+      <label for="spotDist">Spot Distance (ft):</label>
+      <input type="number" id="spotDist" step="any" placeholder="Enter distance">
+    </div>
+    <div class="spot-result">
+      Spot Elevation: <span id="spotElev">—</span> ft
+    </div>
+  </section>
+
+  <!-- Canvas & Click Analysis -->
+  <canvas id="profileCanvas" width="800" height="400"></canvas>
+  <div class="click-result">
+    Selected Points: <span id="clickInfo">none</span> &nbsp;|&nbsp;
+    Calculated Slope: <span id="clickSlope">—</span>%
   </div>
 
   <script>
-    const riseInput  = document.getElementById('rise');
-    const ratioInput = document.getElementById('ratio');
-    const runEl      = document.getElementById('run');
-    const pctEl      = document.getElementById('percent');
-    const nRunsEl    = document.getElementById('nRuns');
-    const landEl     = document.getElementById('landings');
-    const landingEl  = document.getElementById('landingLen');
+    // DOM refs
+    const startElevInput = document.getElementById('startElev');
+    const designSlopeInput = document.getElementById('designSlope');
+    const designRunInput = document.getElementById('designRun');
+    const computeDesignBtn = document.getElementById('computeDesign');
+    const endElevSpan = document.getElementById('endElev');
+    const designRiseSpan = document.getElementById('designRise');
 
-    function calculate() {
-      const rise  = parseFloat(riseInput.value);
-      const ratio = parseFloat(ratioInput.value);
-      if (isNaN(rise) || isNaN(ratio) || ratio <= 0) {
-        [runEl, pctEl, nRunsEl, landEl, landingEl].forEach(el => el.textContent = '—');
-        return;
-      }
-      const run       = rise * ratio;
-      const slopePct  = (1 / ratio) * 100;
-      const nRuns     = Math.ceil(rise / 30);
-      const landings  = Math.max(0, nRuns - 1);
-      const landLen   = landings * 60;
+    const pointsBody = document.querySelector('#pointsTable tbody');
+    const addPointBtn = document.getElementById('addPoint');
+    const computeProfileBtn = document.getElementById('computeProfile');
+    const segmentsBody = document.querySelector('#segmentsTable tbody');
+    const spotInput = document.getElementById('spotDist');
+    const spotElevSpan = document.getElementById('spotElev');
 
-      runEl.textContent     = run.toFixed(2);
-      pctEl.textContent     = slopePct.toFixed(2) + ' %';
-      nRunsEl.textContent   = nRuns;
-      landEl.textContent    = landings;
-      landingEl.textContent = landLen.toFixed(2);
+    const canvas = document.getElementById('profileCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Design calculation
+    computeDesignBtn.addEventListener('click', () => {
+      const start = parseFloat(startElevInput.value);
+      const slope = parseFloat(designSlopeInput.value) / 100;
+      const run = parseFloat(designRunInput.value);
+      if (isNaN(start) || isNaN(slope) || isNaN(run)) return;
+      const rise = slope * run;
+      const end = start + rise;
+      designRiseSpan.textContent = rise.toFixed(2);
+      endElevSpan.textContent = end.toFixed(2);
+      drawProfile([{d:0,e:start}, {d:run,e:end}], {color:'#28a745'});
+    });
+
+    // Profile point management
+    function addRow() {
+      const row = document.createElement('tr');
+      row.innerHTML =
+        '<td><input type="number" class="dist" step="any"></td>' +
+        '<td><input type="number" class="elev" step="any"></td>' +
+        '<td><button class="removeBtn">Remove</button></td>';
+      row.querySelector('.removeBtn').addEventListener('click', () => row.remove());
+      pointsBody.appendChild(row);
+    }
+    addPointBtn.addEventListener('click', addRow);
+
+    // Helpers
+    function getPoints() {
+      return Array.from(pointsBody.querySelectorAll('tr'))
+        .map(r => ({
+          d: parseFloat(r.querySelector('.dist').value),
+          e: parseFloat(r.querySelector('.elev').value)
+        }))
+        .filter(p => !isNaN(p.d) && !isNaN(p.e))
+        .sort((a,b) => a.d - b.d);
     }
 
-    riseInput.addEventListener('input', calculate);
-    ratioInput.addEventListener('input', calculate);
+    // Drawing
+    let lastProfile = [];
+    function drawProfile(pts, opts={color:'#007bff'}) {
+      lastProfile = pts.slice();
+      const w=canvas.width, h=canvas.height, mx=60, my=40;
+      const ds = pts.map(p=>p.d), es=pts.map(p=>p.e);
+      const maxD=Math.max(...ds), minE=Math.min(...es), maxE=Math.max(...es);
+      const xScale=(w-2*mx)/maxD, yScale=(h-2*my)/(maxE-minE);
+      ctx.clearRect(0,0,w,h);
+      // axes
+      ctx.strokeStyle='#000'; ctx.beginPath();
+      ctx.moveTo(mx,h-my); ctx.lineTo(w-mx,h-my);
+      ctx.moveTo(mx,h-my); ctx.lineTo(mx,my);
+      ctx.stroke();
+      // line
+      ctx.strokeStyle=opts.color; ctx.lineWidth=2; ctx.beginPath();
+      pts.forEach((p,i)=>{
+        const x=mx+p.d*xScale, y=h-my-(p.e-minE)*yScale;
+        i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+      });
+      ctx.stroke();
+      // points
+      ctx.fillStyle=opts.color;
+      pts.forEach(p=>{
+        const x=mx+p.d*xScale, y=h-my-(p.e-minE)*yScale;
+        ctx.beginPath(); ctx.arc(x,y,5,0,2*Math.PI); ctx.fill();
+      });
+      return {mx,my,xScale,yScale,minE,h};
+    }
+
+    // Profile calculation
+    function computeProfile() {
+      const pts=getPoints();
+      segmentsBody.innerHTML='';
+      if(pts.length<2) return;
+      pts.slice(0,-1).forEach((p,i)=>{
+        const n=pts[i+1];
+        const run=n.d-p.d, rise=n.e-p.e;
+        const slope=(rise/run)*100, ratio=run/rise;
+        const tr=document.createElement('tr');
+        tr.innerHTML=
+          `<td>${i+1}</td>`+
+          `<td>${run.toFixed(2)}</td>`+
+          `<td>${rise.toFixed(2)}</td>`+
+          `<td>${slope.toFixed(2)}%</td>`+
+          `<td>1:${ratio.toFixed(2)}</td>`;
+        segmentsBody.appendChild(tr);
+      });
+      const profile = drawProfile(pts);
+      computeSpot(pts, profile);
+    }
+    computeProfileBtn.addEventListener('click', computeProfile);
+
+    // Spot elevation
+    function computeSpot(pts, profile) {
+      const d=parseFloat(spotInput.value);
+      const {mx,my,xScale,yScale,minE,h} = profile;
+      if(isNaN(d)||d<pts[0].d||d>pts[pts.length-1].d){
+        spotElevSpan.textContent='—'; return;
+      }
+      let elev;
+      for(let i=0;i<pts.length-1;i++){
+        if(d>=pts[i].d&&d<=pts[i+1].d){
+          const frac=(d-pts[i].d)/(pts[i+1].d-pts[i].d);
+          elev=pts[i].e+frac*(pts[i+1].e-pts[i].e);
+          break;
+        }
+      }
+      spotElevSpan.textContent=elev.toFixed(2);
+      const x=mx+d*xScale, y=h-my-(elev-minE)*yScale;
+      ctx.fillStyle='#dc3545'; ctx.beginPath(); ctx.arc(x,y,6,0,2*Math.PI); ctx.fill();
+    }
+    spotInput.addEventListener('input', computeProfile);
+
+    // Click-to-analyze slope
+    canvas.addEventListener('click',(e)=>{
+      if(!lastProfile.length) return;
+      const rect=canvas.getBoundingClientRect(), mx=60, my=40;
+      const w=canvas.width, h=canvas.height;
+      const ds=lastProfile.map(p=>p.d), es=lastProfile.map(p=>p.e);
+      const maxD=Math.max(...ds), minE=Math.min(...es), maxE=Math.max(...es);
+      const xScale=(w-2*mx)/maxD, yScale=(h-2*my)/(maxE-minE);
+      const xRaw=e.clientX-rect.left, yRaw=e.clientY-rect.top;
+      const d=(xRaw-mx)/xScale;
+      const elev = minE + ((h-my)-yRaw)/yScale;
+      clickPts = clickPts || [];
+      clickPts.push({d,e}); if(clickPts.length>2) clickPts.shift();
+      drawProfile(lastProfile);
+      ctx.fillStyle='#ff9900';
+      clickPts.forEach(p=>{
+        const x=mx+p.d*xScale, y=h-my-(p.e-minE)*yScale;
+        ctx.beginPath(); ctx.arc(x,y,6,0,2*Math.PI); ctx.fill();
+      });
+      if(clickPts.length===2){
+        const [p1,p2]=clickPts;
+        const run=Math.abs(p2.d-p1.d), rise=p2.e-p1.e;
+        const slope=(rise/run)*100;
+        document.getElementById('clickInfo').textContent =
+          `(${p1.d.toFixed(2)},${p1.e.toFixed(2)})→(${p2.d.toFixed(2)},${p2.e.toFixed(2)})`;
+        document.getElementById('clickSlope').textContent = slope.toFixed(2);
+      } else {
+        document.getElementById('clickInfo').textContent = 'select two points';
+        document.getElementById('clickSlope').textContent = '—';
+      }
+    });
+
+    // Initialize
+    window.addEventListener('load',()=>{ drawProfile([{d:0,e:0},{d:1,e:0}]); });
   </script>
 </body>
 </html>
+
