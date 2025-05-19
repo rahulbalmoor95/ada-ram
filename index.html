@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ADA Ramp Profile Calculator</n>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 1em auto; padding: 0 1em; }
+    h1, h2 { text-align: center; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 1em; }
+    th, td { border: 1px solid #ccc; padding: 0.5em; text-align: center; }
+    input[type=number] { width: 100%; padding: 0.3em; box-sizing: border-box; }
+    button { padding: 0.5em 1em; margin: 0.5em 0; }
+    #profileCanvas { border: 1px solid #ccc; display: block; margin: 1em auto; }
+    .field { margin-bottom: 1em; }
+    .spot-result { font-size: 1.2em; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>ADA Ramp Profile Calculator</h1>
+  <h2>Define Profile Points</h2>
+  <table id="pointsTable">
+    <thead>
+      <tr><th>Distance (in)</th><th>Elevation (in)</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><input type="number" class="dist" value="0" step="any"></td>
+        <td><input type="number" class="elev" step="any"></td>
+        <td><button class="removeBtn">Remove</button></td>
+      </tr>
+    </tbody>
+  </table>
+  <button id="addPoint">Add Point</button>
+  <button id="computeProfile">Compute & Plot Profile</button>
+
+  <h2>Segment Calculations</h2>
+  <table id="segmentsTable">
+    <thead>
+      <tr><th>#</th><th>Run (in)</th><th>Rise (in)</th><th>Slope %</th><th>Ratio (1:X)</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="field">
+    <label for="spotDist">Spot Distance (inches):</label>
+    <input type="number" id="spotDist" step="any" placeholder="Enter distance">
+  </div>
+  <div class="spot-result">Spot Elevation: <span id="spotElev">—</span></div>
+
+  <canvas id="profileCanvas" width="750" height="300"></canvas>
+
+  <script>
+    const pointsTable = document.getElementById('pointsTable').querySelector('tbody');
+    const segmentsBody = document.getElementById('segmentsTable').querySelector('tbody');
+    const addPointBtn = document.getElementById('addPoint');
+    const computeBtn = document.getElementById('computeProfile');
+    const spotInput = document.getElementById('spotDist');
+    const spotElev = document.getElementById('spotElev');
+    const canvas = document.getElementById('profileCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function addRow() {
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td><input type="number" class="dist" step="any"></td>
+        <td><input type="number" class="elev" step="any"></td>
+        <td><button class="removeBtn">Remove</button></td>
+      `;
+      row.querySelector('.removeBtn').addEventListener('click', () => row.remove());
+      pointsTable.appendChild(row);
+    }
+
+    addPointBtn.addEventListener('click', addRow);
+
+    function getPoints() {
+      const rows = [...pointsTable.querySelectorAll('tr')];
+      const pts = rows.map(r => {
+        const d = parseFloat(r.querySelector('.dist').value);
+        const e = parseFloat(r.querySelector('.elev').value);
+        return { d, e };
+      }).filter(p => !isNaN(p.d) && !isNaN(p.e));
+      return pts.sort((a,b) => a.d - b.d);
+    }
+
+    function computeProfile() {
+      const pts = getPoints();
+      segmentsBody.innerHTML = '';
+      if (pts.length < 2) return;
+      // compute segments
+      const segments = [];
+      for (let i=0; i<pts.length-1; i++) {
+        const run = pts[i+1].d - pts[i].d;
+        const rise = pts[i+1].e - pts[i].e;
+        const slopePct = (rise/run)*100;
+        const ratio = run/ rise;
+        segments.push({ run, rise, slopePct, ratio });
+      }
+      // populate table
+      segments.forEach((seg,i) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${i+1}</td>
+          <td>${seg.run.toFixed(2)}</td>
+          <td>${seg.rise.toFixed(2)}</td>
+          <td>${seg.slopePct.toFixed(2)}%</td>
+          <td>1:${seg.ratio.toFixed(2)}</td>
+        `;
+        segmentsBody.appendChild(tr);
+      });
+      plotProfile(pts);
+      computeSpot(pts, segments);
+    }
+
+    function plotProfile(pts) {
+      const w = canvas.width, h = canvas.height;
+      ctx.clearRect(0,0,w,h);
+      // margins
+      const mx = 50, my = 30;
+      const maxD = Math.max(...pts.map(p=>p.d));
+      const minE = Math.min(...pts.map(p=>p.e));
+      const maxE = Math.max(...pts.map(p=>p.e));
+      const xScale = (w - 2*mx) / maxD;
+      const yScale = (h - 2*my) / (maxE - minE);
+      // axes
+      ctx.beginPath(); ctx.moveTo(mx, h-my); ctx.lineTo(w-mx, h-my); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(mx, h-my); ctx.lineTo(mx, my); ctx.stroke();
+      // profile line
+      ctx.beginPath();
+      pts.forEach((p,i) => {
+        const x = mx + p.d * xScale;
+        const y = h - my - (p.e - minE)* yScale;
+        if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.strokeStyle = '#007bff'; ctx.lineWidth = 2; ctx.stroke();
+      // points
+      pts.forEach(p => {
+        const x = mx + p.d * xScale;
+        const y = h - my - (p.e - minE)* yScale;
+        ctx.beginPath(); ctx.arc(x,y,4,0,2*Math.PI); ctx.fillStyle='#007bff'; ctx.fill();
+      });
+    }
+
+    function computeSpot(pts, segments) {
+      const d = parseFloat(spotInput.value);
+      if (isNaN(d) || d < pts[0].d || d> pts[pts.length-1].d) {
+        spotElev.textContent='—';
+        return;
+      }
+      // find segment
+      let elev;
+      for (let i=0; i<pts.length-1; i++) {
+        if (d >= pts[i].d && d <= pts[i+1].d) {
+          const frac = (d - pts[i].d)/(pts[i+1].d-pts[i].d);
+          elev = pts[i].e + frac*(pts[i+1].e-pts[i].e);
+          break;
+        }
+      }
+      spotElev.textContent = elev.toFixed(2);
+      // draw spot on canvas
+      plotProfile(pts);
+      const w = canvas.width, h = canvas.height;
+      const mx = 50, my = 30;
+      const maxD = Math.max(...pts.map(p=>p.d));
+      const minE = Math.min(...pts.map(p=>p.e));
+      const maxE = Math.max(...pts.map(p=>p.e));
+      const xScale = (w - 2*mx) / maxD;
+      const yScale = (h - 2*my) / (maxE - minE);
+      const x = mx + d * xScale;
+      const y = h - my - (elev - minE)* yScale;
+      ctx.beginPath(); ctx.arc(x,y,6,0,2*Math.PI); ctx.fillStyle='#dc3545'; ctx.fill();
+    }
+
+    computeBtn.addEventListener('click', computeProfile);
+    spotInput.addEventListener('input', () => computeProfile());
+  </script>
+</body>
+</html>
